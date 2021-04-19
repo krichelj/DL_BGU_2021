@@ -1,12 +1,12 @@
 import tensorflow as tf
-
+from img_augmentations import augment_ds
 
 def create_dataset(filename, debug=False, split=None, BATCH_SIZE=32):
     filenames, labels = _generate_filenames_labels(filename)
     return create_dataset_as_DS(filenames, labels, debug=debug, split=split, BATCH_SIZE=BATCH_SIZE)
 
 
-def create_dataset_as_DS(filenames, labels, debug=False, split=None, BATCH_SIZE=32):
+def create_dataset_as_DS(filenames, labels, augment=False, debug=False, split=None, BATCH_SIZE=32):
     """
     Create data-set as Tensorflow Dataset object.
     :param filenames: list of the filenames corresponds to the data-set
@@ -18,7 +18,9 @@ def create_dataset_as_DS(filenames, labels, debug=False, split=None, BATCH_SIZE=
     """
     data_sets = []
     ds = tf.data.Dataset.from_tensor_slices((filenames, labels))
-    ds = ds.map(parser)
+    ds = ds.map(parser)  # after this the data-set becomes tensors and labels
+    if augment:
+        ds = augment_ds(ds, 'all')
     ds = ds.shuffle(buffer_size=len(filenames), reshuffle_each_iteration=False)
 
     if debug:
@@ -53,6 +55,8 @@ def create_dataset_as_DS(filenames, labels, debug=False, split=None, BATCH_SIZE=
     data_sets = [ds.prefetch(buffer_size=tf.data.AUTOTUNE) for ds in data_sets]
 
     return data_sets
+
+
 
 
 def parser(filenames_tensor, label):

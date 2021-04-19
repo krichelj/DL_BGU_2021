@@ -7,6 +7,8 @@ import datetime
 from data_set import create_dataset
 
 
+
+
 def small_run_for_debug():
     input_shape = (16, 2, 250, 250, 3)
     # x = tf.random.normal(input_shape)
@@ -41,7 +43,7 @@ def train_siamese_debug(train_file_name, test_file_name, BATCH_SIZE=32):
     train_ds, valid_ds = create_dataset(train_file_name, debug=True, split=0.2, BATCH_SIZE=BATCH_SIZE)
     [test_ds] = create_dataset(test_file_name, debug=True, BATCH_SIZE=BATCH_SIZE)
 
-    model = SiameseNetwork()
+    model = SiameseNetwork((250, 250, 3))
 
     model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.001, momentum=0.5), loss="binary_crossentropy",
                   metrics=["accuracy"])
@@ -78,21 +80,22 @@ def train_siamese(train_file_name, test_file_name, BATCH_SIZE=32):
     train_ds, valid_ds = create_dataset(train_file_name, split=0.2, BATCH_SIZE=BATCH_SIZE)
     [test_ds] = create_dataset(test_file_name, BATCH_SIZE=BATCH_SIZE)
 
-    model = SiameseNetwork()
+    model = SiameseNetwork((250, 250, 3))
 
-    initial_lr = 0.1
+    initial_lr = 0.01
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_lr,
-        decay_steps=200,
+        decay_steps=55,
         decay_rate=0.99,
         staircase=True
     )
 
-    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.5), loss="binary_crossentropy",
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.5),
+                  loss="binary_crossentropy",
                   metrics=["accuracy"])
 
-    model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.001, momentum=0.5), loss="binary_crossentropy",
-                  metrics=["accuracy"])
+    # model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.001, momentum=0.5), loss="binary_crossentropy",
+    #               metrics=["accuracy"])
 
     # model.run_eagerly = True  # TODO: use only for debug purposes!
 

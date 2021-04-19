@@ -4,13 +4,13 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Dr
 
 
 class BackboneCNN(keras.Model):
-    def __init__(self):
+    def __init__(self, input_shape):
         super(BackboneCNN, self).__init__()
         # Given input size: W1 x H1 x D1
         # K - num of filters, F - filter size, S = stride, P = padding
         # Conv output: W2 = [(W1 - F + 2P)/S] + 1, H2 = [(H2 - F + 2P)/S] + 1, D2 = K
         # maxpool output: W2 = [(W1 - F)/S] + 1 , H2 = [(H2 - F)/S] + 1, D2 = D1
-        self.layer1 = Conv2D(filters=64, kernel_size=[10, 10], strides=[1, 1],
+        self.layer1 = Conv2D(filters=64, input_shape=input_shape, kernel_size=[10, 10], strides=[1, 1],
                              kernel_regularizer=tf.keras.regularizers.l2(2e-3), activation='relu', name="Conv1")
         self.pool1 = MaxPooling2D(pool_size=[3, 3], strides=[2, 2])
         # self.dropout1 = Dropout(rate=0.1)
