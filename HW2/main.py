@@ -80,9 +80,21 @@ def train_siamese(train_file_name, test_file_name, BATCH_SIZE=32):
 
     model = SiameseNetwork()
 
+    initial_lr = 0.1
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_lr,
+        decay_steps=200,
+        decay_rate=0.99,
+        staircase=True
+    )
+
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.5), loss="binary_crossentropy",
+                  metrics=["accuracy"])
+
     model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.001, momentum=0.5), loss="binary_crossentropy",
                   metrics=["accuracy"])
-    model.run_eagerly = True  # TODO: use only for debug purposes!
+
+    # model.run_eagerly = True  # TODO: use only for debug purposes!
 
     input_shape = (BATCH_SIZE, 2, 250, 250, 3)
 

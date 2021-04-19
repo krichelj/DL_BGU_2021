@@ -1,41 +1,36 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Dropout, Dense, Flatten
+from tensorflow.keras.regularizers import l2
 
 
-class BackboneCNN(keras.Model):
-    def __init__(self):
-        super(BackboneCNN, self).__init__()
+class BackboneCNN2(keras.Model):
+    def __init__(self, input_shape):
+        super(BackboneCNN2, self).__init__()
         # Given input size: W1 x H1 x D1
         # K - num of filters, F - filter size, S = stride, P = padding
         # Conv output: W2 = [(W1 - F + 2P)/S] + 1, H2 = [(H2 - F + 2P)/S] + 1, D2 = K
         # maxpool output: W2 = [(W1 - F)/S] + 1 , H2 = [(H2 - F)/S] + 1, D2 = D1
-        self.layer1 = Conv2D(filters=64, kernel_size=[10, 10], strides=[1, 1],
-                             kernel_regularizer=tf.keras.regularizers.l2(2e-3), activation='relu', name="Conv1")
-        self.pool1 = MaxPooling2D(pool_size=[3, 3], strides=[2, 2])
+        self.input_shape = input_shape
+
+        self.layer1 = Conv2D(filters=64, kernel_size=(10, 10),activation='relu', input_shape=self.input_shape,kernel_regularizer=l2(1e-02),name='Conv1')
+        self.pool1 = MaxPooling2D()
         # self.dropout1 = Dropout(rate=0.1)
         self.batchnorm1 = BatchNormalization()
-        self.layer2 = Conv2D(filters=128, kernel_size=[7, 7], strides=[1, 1],
-                             kernel_regularizer=tf.keras.regularizers.l2(2e-3), activation='relu', name="Conv2")
-        self.pool2 = MaxPooling2D(pool_size=[3, 3], strides=[2, 2])
+        self.layer2 = Conv2D(filters=128, kernel_size=(7, 7), activation='relu',kernel_regularizer=l2(1e-02), name='Conv2')
+        self.pool2 = MaxPooling2D()
         # self.dropout2 = Dropout(rate=0.15)
         self.batchnorm2 = BatchNormalization()
-        self.layer3 = Conv2D(filters=128, kernel_size=[4, 4], strides=[1, 1],
-                             kernel_regularizer=tf.keras.regularizers.l2(2e-3), activation='relu', name="Conv3")
-        self.pool3 = MaxPooling2D(pool_size=[3, 3], strides=[2, 2])
+        self.layer3 = Conv2D(filters=128, kernel_size=(4, 4),activation='relu',kernel_regularizer=l2(1e-02), name='Conv3')
+        self.pool3 = MaxPooling2D()
         # self.dropout3 = Dropout(rate=0.1)
         self.batchnorm3 = BatchNormalization()
-        self.layer4 = Conv2D(filters=256, kernel_size=[4, 4], strides=[1, 1],
-                             kernel_regularizer=tf.keras.regularizers.l2(2e-3), activation='relu', name="Conv4")
-        self.pool4 = MaxPooling2D(pool_size=[3, 3], strides=[2, 2])
+        self.layer4 = Conv2D(filters=256, kernel_size=(4, 4),activation='relu',kernel_regularizer=l2(1e-02), name='Conv4')
+        self.pool4 = MaxPooling2D()
         # self.dropout4 = Dropout(rate=0.1)
         self.batchnorm4 = BatchNormalization()
-        # self.layer5 = Conv2D(filters=256, kernel_size=[1, 1], strides=[1, 1], activation='relu',
-        #                      kernel_regularizer=tf.keras.regularizers.l2(2e-1), name="Conv5")
-        # self.pool5 = MaxPooling2D(pool_size=[3, 3], strides=[2, 2])
         self.flatten = Flatten()
-        self.dense1 = Dense(4096, activation='sigmoid', kernel_regularizer=tf.keras.regularizers.l2(2e-2),
-                            name='Dense1')
+        self.dense1 = Dense(4096, activation='sigmoid', kernel_regularizer=l2(1e-04), name='Dense1')
 
     def call(self, inputs, training=None, mask=None):
         # Given input: (m, 250, 250, 3) , m = batch_size
