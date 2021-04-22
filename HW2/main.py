@@ -7,8 +7,6 @@ import datetime
 from data_set import create_dataset
 
 
-
-
 def small_run_for_debug():
     input_shape = (16, 2, 250, 250, 3)
     # x = tf.random.normal(input_shape)
@@ -41,7 +39,7 @@ def train_siamese_debug(train_file_name, test_file_name, BATCH_SIZE=32):
     #                                                    mode="auto", period=1)
 
     train_ds, valid_ds = create_dataset(train_file_name, debug=True, split=0.2, BATCH_SIZE=BATCH_SIZE)
-    [test_ds] = create_dataset(test_file_name, debug=True, BATCH_SIZE=BATCH_SIZE)
+    test_ds = create_dataset(test_file_name, debug=True, BATCH_SIZE=BATCH_SIZE)
 
     model = SiameseNetwork((250, 250, 3))
 
@@ -77,12 +75,12 @@ def train_siamese(train_file_name, test_file_name, BATCH_SIZE=32):
                                                        mode="auto", period=1)
 
     # train_dataset = create_dataset(train_file_name)
-    train_ds, valid_ds = create_dataset(train_file_name, split=0.2, BATCH_SIZE=BATCH_SIZE)
-    [test_ds] = create_dataset(test_file_name, BATCH_SIZE=BATCH_SIZE)
+    train_ds, valid_ds = create_dataset(train_file_name, augment=False, split=0.2, BATCH_SIZE=BATCH_SIZE)
+    test_ds = create_dataset(test_file_name, BATCH_SIZE=BATCH_SIZE)
 
-    model = SiameseNetwork((250, 250, 3))
+    model = SiameseNetwork((250, 250, 3), augment=True)
 
-    initial_lr = 0.01
+    initial_lr = 0.1
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
         initial_lr,
         decay_steps=55,
@@ -103,7 +101,7 @@ def train_siamese(train_file_name, test_file_name, BATCH_SIZE=32):
 
     model.build(input_shape)
 
-    model.summary()
+    # model.summary()
 
     model.fit(train_ds,
               epochs=15,
@@ -117,8 +115,40 @@ def train_siamese(train_file_name, test_file_name, BATCH_SIZE=32):
                    callbacks=[tensorboard_callback])
 
 
+def load_model_eval(filepath, test_file_name, BATCH_SIZE=32):
+
+    model = SiameseNetwork((250, 250, 3))
+    input_shape = (BATCH_SIZE, 2, 250, 250, 3)
+    model.build(input_shape)
+
+    initial_lr = 0.1
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_lr,
+        decay_steps=55,
+        decay_rate=0.99,
+        staircase=True
+    )
+
+    model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.5),
+                  loss="binary_crossentropy",
+                  metrics=["accuracy"])
+
+    model.load_weights(filepath)
+    test_ds = create_dataset(test_file_name, BATCH_SIZE=BATCH_SIZE)
+
+    print("Restored model, preparing to evaluate....")
+
+    loss, acc = model.evaluate(test_ds,
+                   steps=None,
+                   verbose=2)
+
+    print("Restored model, accuracy: {:5.2f}%".format(100 * acc))
+    print("Restored model, loss: {:5.2f}".format(loss))
+
+
 if __name__ == "__main__":
     train_file_name = "pairsDevTrain.txt"
     test_file_name = "pairsDevTest.txt"
     # train_siamese_debug(train_file_name, test_file_name)
-    train_siamese(train_file_name, test_file_name)
+    # train_siamese(train_file_name, test_file_name)
+    load_model_eval(filepath='./model_save/siamese_20210419-161845.hdf5', test_file_name=test_file_name)

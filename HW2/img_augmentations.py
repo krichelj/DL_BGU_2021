@@ -10,20 +10,42 @@ def augment_ds(ds: tf.data.Dataset):
     :return:
     """
 
-    dataset = ds.map(_apply_random_transformations, num_parallel_calls=4)
+    dataset = ds.map(_apply_random_transformations)
 
-    dataset = dataset.map(lambda x: tf.clip_by_value(x, 0, 1), num_parallel_calls=4)
+    dataset = dataset.map(lambda x: tf.clip_by_value(x, 0, 1))
 
     return dataset
 
 
-def _affine_transformation(img):
+def _translate(img):
     """
-    Apply affine transformation with random theta
+    Randomly translating the image at each axis
+    :param img: shape : (1, ?, ?, ?)
+    :return:
+    """
+    # tx = np.random.randint(low=-50, high=50)
+    # ty = np.random.randint(low=-50, high=50)
+    #
+    # new_img = tf.keras.preprocessing.image.apply_affine_transform(
+    #     x=img,
+    #     tx=tx,
+    #     ty=ty
+    # )
+    l = tf.keras.layers.experimental.preprocessing.RandomTranslation(
+        height_factor=(-0.2, 0.2),
+        width_factor=(-0.3, 0.3)
+    )
+
+    # return new_img
+    return l(img)
+
+def _rotation(img):
+    """
+    Apply rotation with random theta
     :param img:
     :return:
     """
-    theta = tf.random.uniform(shape=[], minval=-45, maxval=45)
+    theta = np.random.randint(low=-90, high=90)
     new_img = tf.keras.preprocessing.image.apply_affine_transform(
         x=img,
         theta=theta
@@ -32,26 +54,37 @@ def _affine_transformation(img):
     return new_img
 
 
-def _translate(img):
+def _scaling(img):
     """
-    Randomly translating the image
+    Randomly scaling the image by random factor from 0 to 1 at each axis
     :param img: shape : (1, ?, ?, ?)
     :return:
     """
-    l = tf.keras.layers.experimental.preprocessing.RandomTranslation(height_factor=(-0.2, 0.2),
-                                                                     width_factor=(-0.2, 0.2))
-    return l(img)
+    zx = np.random.uniform()
+    zy = np.random.uniform()
+
+    new_img = tf.keras.preprocessing.image.apply_affine_transform(
+        x=img,
+        zx=zx,
+        zy=zy
+    )
+
+    return new_img
 
 
-def _rotation(img):
+def _shear(img):
     """
-    Randomly rotating the image
-    :param img: shape : (1, ?, ?, ?)
+    Shear the image in random angle
+    :param img:
     :return:
     """
-    # rotation between -0.15*2pi to 0.15*2pi =
-    l = tf.keras.layers.experimental.preprocessing.RandomRotation((-0.15, 0.15))
-    return l(img)
+    theta = np.random.randint(low=-45, high=45)
+    new_img = tf.keras.preprocessing.image.apply_affine_transform(
+        x=img,
+        shear=theta
+    )
+
+    return new_img
 
 
 def _apply_random_transformations(images: tf.Tensor, label):
@@ -60,19 +93,37 @@ def _apply_random_transformations(images: tf.Tensor, label):
     :param images: Tensor shape: (2,250,250,3)
     :return:
     """
-    img1 = images[0, :, :, :]
-    img2 = images[1, :, :, :]
+    img1 = tf.expand_dims(images[0, :, :, :], axis=0)
+    img2 = tf.expand_dims(images[1, :, :, :], axis=0)
 
-    rands = np.random.random(size=(2, 2))  # 2 images and 2 possible transforms
+    print(f"Welcome to augmentations!, given shape: {images.shape}")
 
-    if rands[0, 0] > 0.5:
-        img1 = _affine_transformation(img1)
-    if rands[1, 0] > 0.5:
-        img1 = _rotation(img1)
+    rands = np.random.random(size=(2, 4))  # 2 images and 4 possible transforms
 
-    if rands[1, 0] > 0.5:
-        img2 = _affine_transformation(img2)
-    if rands[1, 1] > 0.5:
-        img2 = _rotation(img2)
+    prob = 0.5
 
-    return tf.stack([img1, img2], axis=0), label
+    if rands[0, 0] > prob:
+        img1 = _translate(img1)
+    # if rands[0, 1] > prob:
+    #     img1 = _rotation(img1)
+    # if rands[0, 2] > prob:
+    #     img1 = _scaling(img1)
+    # if rands[0, 3] > prob:
+    #     img1 = _shear(img1)
+
+    if rands[1, 0] > prob:
+        img2 = _translate(img2)
+    # if rands[1, 1] > prob:
+    #     img2 = _rotation(img2)
+    # if rands[1, 2] > prob:
+    #     img2 = _scaling(img2)
+    # if rands[1, 3] > prob:
+    #     img2 = _shear(img2)
+
+    # img1 = tf.convert_to_tensor(img1)
+    # img2 = tf.convert_to_tensor(img2)
+
+
+    # return tf.stack([img1, img2], axis=0), label
+
+    return tf.concat([img1,img2], axis=0)

@@ -1,62 +1,78 @@
 import tensorflow as tf
 from img_augmentations import augment_ds
+import numpy as np
 
-def create_dataset(filename, debug=False, split=None, BATCH_SIZE=32):
+
+def create_dataset(filename, debug=False, augment=False, split=None, BATCH_SIZE=32):
     filenames, labels = _generate_filenames_labels(filename)
-    return create_dataset_as_DS(filenames, labels, debug=debug, split=split, BATCH_SIZE=BATCH_SIZE)
+    if split:
+        filenames, labels = shufflez(filenames, labels)
+        [train_x, train_labels_x], [valid_x, valid_labels_x] = splitter(filenames, labels, split=0.2)
+        train_ds = create_dataset_as_DS(train_x, train_labels_x, debug=debug, augment=augment, BATCH_SIZE=BATCH_SIZE)
+        valid_ds = create_dataset_as_DS(valid_x, valid_labels_x, debug=debug, augment=augment, BATCH_SIZE=BATCH_SIZE)
+        return train_ds, valid_ds
+
+    return create_dataset_as_DS(filenames, labels, debug=debug, augment=augment, BATCH_SIZE=BATCH_SIZE)
 
 
-def create_dataset_as_DS(filenames, labels, augment=False, debug=False, split=None, BATCH_SIZE=32):
+def shufflez(filenames, labels):
+    """
+    Pre shuffle (not efficient but work because the data-set is small)
+    :param filenames:
+    :param labels:
+    :return:
+    """
+    assert len(filenames) == len(labels)
+    num_examples = len(filenames)
+    indices = np.array(list(range(num_examples)))
+    np.random.shuffle(indices)
+    indices_as_list = list(indices)
+    return [filenames[i] for i in indices_as_list], [labels[i] for i in indices_as_list]
+
+
+def splitter(filenames, labels, split=0.2):
+    """
+    Pre split of the given data-set (not efficient but work because the data-set is small)
+    :param filenames:
+    :param labels:
+    :param split:
+    :return:
+    """
+    assert len(filenames) == len(labels)
+    split_index = int((1 - split) * len(filenames))
+    return (filenames[:split_index], labels[:split_index]), (filenames[split_index:], labels[split_index:])
+
+
+def create_dataset_as_DS(filenames, labels, augment=False, debug=False, BATCH_SIZE=32):
     """
     Create data-set as Tensorflow Dataset object.
+    :param augment: if True then apply randomly affine transformations on input
     :param filenames: list of the filenames corresponds to the data-set
     :param labels: list of the labels corresponds to the data-set
     :param debug: if true will create smaller data-sets
-    :param split: split the data-set to 2 data-sets - value is between 0 to 1
     :param BATCH_SIZE: the batch-size
     :return: list of data-sets according to split
     """
-    data_sets = []
     ds = tf.data.Dataset.from_tensor_slices((filenames, labels))
     ds = ds.map(parser)  # after this the data-set becomes tensors and labels
+    ds = ds.shuffle(buffer_size=len(filenames), reshuffle_each_iteration=True)
     if augment:
-        ds = augment_ds(ds, 'all')
-    ds = ds.shuffle(buffer_size=len(filenames), reshuffle_each_iteration=False)
+        ds = augment_ds(ds)
 
     if debug:
         ds = ds.shard(10, index=0)
 
-    if split is not None:
-        split_every = int(1 / split)
+    # def print_recover(x, y):
+    #     tf.print(msg, x)
+    #     return y
 
-        def is_valid(x, y):
-            return x % split_every == 0
+    # ds = ds.enumerate().map(print_recover)
 
-        def is_train(x, y):
-            return not is_valid(x, y)
+    ds = ds.batch(BATCH_SIZE)
 
-        recover = lambda x, y: y
+    ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
 
-        valid_dataset = ds.enumerate() \
-            .filter(is_valid) \
-            .map(recover)
-
-        train_dataset = ds.enumerate() \
-            .filter(is_train) \
-            .map(recover)
-
-        data_sets.extend([train_dataset, valid_dataset])
-
-    else:
-        data_sets.append(ds)
-
-    data_sets = [ds.batch(BATCH_SIZE) for ds in data_sets]
-
-    data_sets = [ds.prefetch(buffer_size=tf.data.AUTOTUNE) for ds in data_sets]
-
-    return data_sets
-
-
+    return ds
 
 
 def parser(filenames_tensor, label):
@@ -75,6 +91,9 @@ def parser(filenames_tensor, label):
     image2_decoded = tf.image.decode_jpeg(i2_string, channels=3)
     image2 = tf.cast(image2_decoded, tf.float32)
     image2 = tf.image.per_image_standardization(image2)
+
+    image1.set_shape((250, 250, 3))
+    image2.set_shape((250, 250, 3))
 
     return tf.stack([image1, image2], axis=0), tf.cast(label, tf.int32)
 
