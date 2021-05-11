@@ -79,8 +79,13 @@ class RNN(keras.Model):
 
     def __init__(self, input_dim: int, pretrained_weights, output_dim):
         super(RNN, self).__init__()
+        """
+        input_dim = Vocab size
+        output_dim = embedding size
+        pretrained_weights = imported embedding matrix
+        """
         self.embed1 = Embedding(input_dim=input_dim, output_dim=output_dim)
-        self.embed1.build((None,))
+        self.embed1.build((None,))  # hack for setting the embedding matrix
         self.embed1.set_weights([pretrained_weights])
         self.embed1.trainable = False
         self.lstm1 = LSTM(units=256, return_sequences=True)
@@ -108,6 +113,24 @@ def train(csv_path,
     word_to_index = word2vec_model.key_to_index
 
     predictors, label = create_dataset(csv_path, index_to_word, word_to_index)
+
+    """
+    TODOLIST:
+    Notes: 
+        a) Do not remove the & 
+    1) create the dataset s.t:
+        each member of the dataset is : (x, y)
+        x is 1-D list of shape = (timesteps) ,   (batched)====> (batch_size, timesteps) => (batch_size, timesteps, output_dim)
+        y is shape = (timesteps, vocab_size) where we have 1 in the true word. (batched) ====> (batch_size, timesteps, vocab_size)
+        
+    2) debug to the current architecture of the model (call with mocked input)
+    3) write the generation function
+    4) debug the generation function with random model with our architecture
+    5) feature engineering of midi
+    6) add layer of adding the midi features to the model
+    7) debug with mock
+    8) train.
+    """
 
     vocab_size, embedding_size = pretrained_weights.shape
     output_dim = int(word2vec_model_name.split('-')[-1])
