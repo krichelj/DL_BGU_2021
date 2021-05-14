@@ -12,6 +12,14 @@ import gensim.downloader
 import numpy as np
 
 
+word2vec_model_name = 'glove-wiki-gigaword-300'
+word2vec_model = gensim.downloader.load(word2vec_model_name)
+pretrained_weights = word2vec_model.vectors
+index_to_word = word2vec_model.index_to_key
+word_to_index = word2vec_model.key_to_index
+nltk.download('stopwords')
+
+
 def apply_tf_tokenization(x):
     output = tf.keras.preprocessing.text.text_to_word_sequence(
         x, filters='''!"#$%()*+,-./:;<=>?@[\\]^_`'{|}~\t\n''',
@@ -146,6 +154,7 @@ def train(csv_path,
     plt.show()
 
     return X, Y
+
 
 csv_filename = 'lyrics_train_set.csv'
 csv_path = Path(rf'{csv_filename}')
