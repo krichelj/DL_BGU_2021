@@ -20,6 +20,12 @@ word_to_index = word2vec_model.key_to_index
 nltk.download('stopwords')
 
 
+def apply_tf_tokenization(x):
+    return tf.keras.preprocessing.text.text_to_word_sequence(
+        str(x), filters='''!"#$%()*+,-./:;<=>?@[\\]^_`'{|}~\t\n''',
+        lower=True, split=' ')
+
+
 def add_words_from_songs(word2vec_model, songs_lyrics, word_to_index, output_dim):
     """
     Add words from all songs to the vocabulary
@@ -29,26 +35,20 @@ def add_words_from_songs(word2vec_model, songs_lyrics, word_to_index, output_dim
     :param word_to_index: Word to index dict
     :return: Updated word to index dict
     """
-    #     all_words_from_songs = set([w for s in songs_lyrics for w in s.split()])
-    all_words_from_songs = set([])
+
+    all_words_from_songs = set()
 
     for song in songs_lyrics:
-        curr = set(tf.keras.preprocessing.text.text_to_word_sequence(
-            song, filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n',
-            lower=True, split=' '))
-        all_words_from_songs.union(curr)
+        curr = set(apply_tf_tokenization(song))
+        all_words_from_songs = all_words_from_songs.union(curr)
 
-    print(all_words_from_songs)
-
-
-#     all_words_to_add = list(.difference(set(word_to_index.keys())))
-#     print(len(word_to_index.keys()))
-#     words_num = len(all_words_to_add)
-#     initial_weights = np.random.randn(*(words_num, output_dim))
-#     word2vec_model.add_vectors(keys=all_words_to_add, weights=initial_weights)
+    all_words_to_add = list(all_words_from_songs.difference(set(word_to_index.keys())))
+    words_num = len(all_words_to_add)
+    initial_weights = np.random.randn(*(words_num, output_dim))
+    word2vec_model.add_vectors(keys=all_words_to_add, weights=initial_weights)
 
 
-def tokenize(songs_lyrics, word_to_index, max_sequence_len):
+def tokenize(word_to_index, max_sequence_len):
     """ Tokenize the songs' lyrics
     :param songs_lyrics: All songs
     :param word_to_index: Word to index dict
@@ -60,18 +60,15 @@ def tokenize(songs_lyrics, word_to_index, max_sequence_len):
     w_set = current_words.difference(swords)
     num_of_classes = len(word_to_index)
 
-    for song in songs_lyrics:
-        x = tf.keras.preprocessing.text.text_to_word_sequence(
-            song, filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n',
-            lower=True, split=' ')
-
+    def tokenize_current_song(song):
+        x = apply_tf_tokenization(song)
         x = [word_to_index[w] for w in x if w in w_set]
-        offset_indices = np.array(x[1:] + [0])
+        offset_indices = x[1:] + [0]
+        y = offset_indices
 
-        y = np.zeros((offset_indices.shape[0], num_of_classes))
-        y[np.arange(offset_indices.shape[0]), offset_indices] = 1
+        return x, y
 
-        yield x, y
+    return tokenize_current_song
 
 
 def create_dataset(csv_file_path: Path, word2vec_model, index_to_word, word_to_index, output_dim):
@@ -87,24 +84,20 @@ def create_dataset(csv_file_path: Path, word2vec_model, index_to_word, word_to_i
     df = pd.read_csv(csv_file_path, header=None)
     artists_names, songs_names, songs_lyrics = df.iloc[:, 0], df.iloc[:, 1], df.iloc[:, 2]
     max_sequence_len = max([len(s.split()) for s in songs_lyrics])
-
     add_words_from_songs(word2vec_model, songs_lyrics, word_to_index, output_dim)
-    x_y_gen = tokenize(songs_lyrics, word_to_index, max_sequence_len)
 
-    i = 0
-    X = []
-    Y = []
+    ds = tf.data.Dataset.from_tensor_slices(songs_lyrics)
+    tokenize_func = tokenize(word_to_index, max_sequence_len)
+    ds = ds.map(tokenize_func)
+    ds_gen = ds.batch(3)
 
-    for x, y in x_y_gen:
-        X.append(x)
-        Y.append(y)
-        i += 1
-        if i == 5:
-            break
+    for batch in ds_gen.as_numpy_iterator():
+        print(ds_gen)
 
-    X = np.array(pad_sequences(X, maxlen=max_sequence_len, padding='pre'))
+    # ds = tf.data.Dataset.from_tensor_slices((X, Y))
+    # X = np.array(pad_sequences(X, maxlen=max_sequence_len, padding='pre'))
 
-    return X, np.array(Y)
+    return ds
 
 
 class RNN(keras.Model):
@@ -138,7 +131,8 @@ def train(csv_path,
     RNN_model = RNN(input_dim=vocab_size,
                     pretrained_weights=pretrained_weights,
                     output_dim=output_dim)
-    X, Y = create_dataset(csv_path, word2vec_model, index_to_word, word_to_index, output_dim)
+    ds = create_dataset(csv_path, word2vec_model, index_to_word, word_to_index, output_dim)
+    print(ds)
 
     # RNN_model.compile(optimizer='adam',
     #                   loss="categorical_crossentropy",
@@ -161,12 +155,8 @@ def train(csv_path,
     # plt.legend()
     # plt.show()
 
-    return X, Y
+    return ds
 
-
-csv_filename = 'lyrics_train_set.csv'
-csv_path = Path(rf'{csv_filename}')
-X, Y = train(csv_path)
 
 csv_filename = 'lyrics_train_set.csv'
 csv_path = Path(rf'{csv_filename}')
