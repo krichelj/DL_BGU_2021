@@ -11,13 +11,16 @@ import nltk
 import gensim.downloader
 import numpy as np
 
-
+nltk.download('stopwords')
 word2vec_model_name = 'glove-wiki-gigaword-300'
-word2vec_model = gensim.downloader.load(word2vec_model_name)
-pretrained_weights = word2vec_model.vectors
+# word2vec_model = gensim.downloader.load(word2vec_model_name)
+path = '/Users/nitzan/gensim-data/glove-wiki-gigaword-300/glove-wiki-gigaword-300.gz'
+print(f'Loading word2vec model...')
+# word2vec_model = gensim.models.KeyedVectors.load_word2vec_format(path)
+word2vec_model = gensim.models.Word2Vec(vector_size=300)
+word2vec_model = word2vec_model.wv
 index_to_word = word2vec_model.index_to_key
 word_to_index = word2vec_model.key_to_index
-nltk.download('stopwords')
 
 
 def apply_tf_tokenization(x):
@@ -49,6 +52,16 @@ def add_words_from_songs(word2vec_model, songs_lyrics, word_to_index, output_dim
     word2vec_model.add_vectors(keys=all_words_to_add, weights=initial_weights)
 
 
+def recreate_w2v_model_with_padkey(word2vec_model, embed_size):
+    existing_words = list(word2vec_model.key_to_index.keys())
+    existing_embeddings = word2vec_model.vectors
+    new_model = gensim.models.KeyedVectors(embed_size)
+    new_model.add_vector(key='[PAD]', vector=np.zeros(embed_size))
+    # word2vec_model.add_vector('[C-PAD]', np.zeros(embed_size))
+    new_model.add_vectors(keys=existing_words, weights=existing_embeddings)
+    return new_model
+
+
 def tokenize(songs_lyrics, word_to_index, max_sequence_len):
     """ Tokenize the songs' lyrics
     :param songs_lyrics: All songs
@@ -67,7 +80,8 @@ def tokenize(songs_lyrics, word_to_index, max_sequence_len):
     for song in songs_lyrics:
         x = apply_tf_tokenization(song)
         x = [word_to_index[w] for w in x if w in w_set]
-        offset_indices = x[1:] + [0]
+        x = x[:-1]  # example: we are going -> x= [we, are]
+        offset_indices = x[1:] # example: we are going -> x= [are, going]
         y = offset_indices
         X.append(x)
         Y.append(y)
@@ -87,12 +101,16 @@ def create_dataset(csv_file_path: Path, word2vec_model, index_to_word, word_to_i
     """
     df = pd.read_csv(csv_file_path, header=None)
     artists_names, songs_names, songs_lyrics = df.iloc[:, 0], df.iloc[:, 1], df.iloc[:, 2]
+
+    # ## Trial
+    # songs_lyrics = ['trial hello', 'hello trial']
+
     max_sequence_len = max([len(s.split()) for s in songs_lyrics])
     add_words_from_songs(word2vec_model, songs_lyrics, word_to_index, output_dim)
     X, Y = tokenize(songs_lyrics, word_to_index, max_sequence_len)
 
-    X = np.array(pad_sequences(X, maxlen=max_sequence_len, padding='post'))
-    Y = np.array(pad_sequences(Y, maxlen=max_sequence_len, padding='post'))
+    X = np.array(pad_sequences(X, maxlen=max_sequence_len, padding='post', value=0))
+    Y = np.array(pad_sequences(Y, maxlen=max_sequence_len, padding='post', value=0))
 
     return X, Y
 
@@ -111,9 +129,11 @@ class RNN(keras.Model):
 
     def call(self, inputs, training=None, mask=None):
         # input: [batch_size, input_length]
+
         x = self.embed1(inputs)  # [batch_size, timesteps, units]
-        x = self.lstm1(x)  # [batch_size, timesteps, units]
-        x = self.lstm2(x)  # [batch_size, timesteps, units]
+        mask = self.embed1.compute_mask(inputs)
+        x = self.lstm1(x, mask=mask)  # [batch_size, timesteps, units]
+        x = self.lstm2(x, mask=mask)  # [batch_size, timesteps, units]
         x = self.dense(x)  # [batch_size, timesteps, vocabulary_size]
 
         return x
@@ -123,18 +143,51 @@ def train(csv_path,
           BATCH_SIZE=32,
           epochs=10
           ):
-    vocab_size, embedding_size = pretrained_weights.shape
     output_dim = int(word2vec_model_name.split('-')[-1])
+    # output_dim = 300
+    global word2vec_model
+
+    word2vec_model = recreate_w2v_model_with_padkey(word2vec_model, output_dim)
+
+    X, Y = create_dataset(csv_path, word2vec_model, index_to_word, word_to_index,
+                          output_dim)
+
+    pretrained_weights = word2vec_model.vectors
+    vocab_size, embedding_size = pretrained_weights.shape
+
     RNN_model = RNN(input_dim=vocab_size,
                     pretrained_weights=pretrained_weights,
                     output_dim=output_dim)
 
-    X, Y = create_dataset(csv_path, word2vec_model, index_to_word, word_to_index,
-                          output_dim)
-    RNN_model.run_eager = True
     RNN_model.compile(optimizer='adam',
                       loss="sparse_categorical_crossentropy",
                       metrics=["accuracy"])
+
+    ##TODO: Trial - Erase
+    RNN_model.run_eagerly = True
+
+    # x = tf.random.uniform(shape=(2, 3), minval=1, maxval=7210, dtype=tf.int32)
+    # x = tf.constant([[2, 1, 0], [2, 2, 0]])
+
+    # x = tf.constant([[2, 1, 1, 0], [2, 2, 1, 1]])
+    # y_pred = RNN_model.predict(x)  # 2,3,2
+    #
+    # # hello world world , hello hello world world
+    # y_true = [[1, 1, 0, 0], [2, 1, 1, 0]]
+    #
+    # y_pred_take_real = y_pred[:, [0, 1], :]
+    # y_very_true = [[1, 1], [2, 1]]
+    # sparse = tf.keras.losses.SparseCategoricalCrossentropy()
+    #
+    # sce1 = tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE)
+    #
+    # loss1 = sparse(y_true, y_pred)
+    #
+    # expected_loss = sparse(y_very_true, y_pred_take_real)
+    #
+    # eval_loss, acc = RNN_model.evaluate(x, tf.constant(y_true))
+
+    ## End trial
 
     history = RNN_model.fit(X,
                             Y,
