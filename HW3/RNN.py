@@ -181,14 +181,14 @@ class RNN(Model):
         self.embed1.build((None,))
         self.embed1.set_weights([pretrained_weights])
         self.embed1.trainable = False
-        self.lstm1 = Bidirectional(LSTM(units=256, return_sequences=True))
+        self.lstm1 = LSTM(units=256, return_sequences=True)
         self.lstm2 = LSTM(units=256, return_sequences=True)
         self.dense = Dense(units=input_dim, activation='softmax')
         self.dense_for_midi = Dense(units=output_dim, activation='tanh')
         self.dense_for_concat = Dense(units=int(output_dim / 2), activation='relu')
         self.attention = Attention()
         self.bn1 = BatchNormalization(axis=1)  # normalize according to each pitch class (has 128) in the batch
-        self.bn2 = BatchNormalization(axis=1)
+        self.bn2 = BatchNormalization()
         self.bn3 = BatchNormalization()
 
     def call(self, inputs: Dict, training: bool = None, mask: bool = None):
@@ -227,7 +227,7 @@ class RNN(Model):
         return x
 
 
-def train(csv_path: Path, test_path: Path, batch_size: int = 2, epochs: int = 20):
+def train(csv_path: Path, test_path: Path, batch_size: int = 2, epochs: int = 22):
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     logs_dir = "logs/fit/" + time
     tensorboard_callback = TensorBoard(log_dir=logs_dir,
@@ -383,12 +383,12 @@ def generate_song(csv_path, test_csv_path, path_to_model):
 train_csv_filename = 'lyrics_train_set.csv'
 train_path = Path(rf'{train_csv_filename}')
 test_path = Path('lyrics_test_set.csv')
-# train(train_path,  test_path)
+train(train_path,  test_path)
 
 
 path_to_model = 'model_save/rnn_20210522-195823.hdf5'
 
-generate_song(train_path, test_path, path_to_model)
+# generate_song(train_path, test_path, path_to_model)
 
 
 def play_with_midi():
