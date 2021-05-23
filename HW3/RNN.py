@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 import tensorflow as tf
 from tensorflow.keras.preprocessing.text import text_to_word_sequence
-from tensorflow.keras.layers import Embedding, LSTM, Dense, Attention, BatchNormalization
+from tensorflow.keras.layers import Embedding, LSTM, Dense, Attention, BatchNormalization, Bidirectional
 from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 from tensorflow.python.data.ops.dataset_ops import DatasetV2 as Dataset
 from tensorflow.keras import Model
@@ -14,6 +14,7 @@ import numpy as np
 import pretty_midi
 import datetime
 from typing import List, Dict, Tuple
+import gensim.downloader
 
 # nltk.download('stopwords')
 word2vec_model_name = 'glove-wiki-gigaword-300'
@@ -123,6 +124,7 @@ def create_dataset(csv_file_path: Path, word_to_index: Dict[str, int], output_di
 
     ds = ds.padded_batch(batch_size, padded_shapes=({"input_1": [None], "input_2": [128, None]}, [None]))
 
+    ds = ds.shuffle(buffer_size=600)
     # for x, y in ds.as_numpy_iterator():
     #     print(x, y)
 
@@ -179,13 +181,15 @@ class RNN(Model):
         self.embed1.build((None,))
         self.embed1.set_weights([pretrained_weights])
         self.embed1.trainable = False
-        self.lstm1 = LSTM(units=256, return_sequences=True)
-        # self.lstm2 = LSTM(units=256, return_sequences=True)
+        self.lstm1 = Bidirectional(LSTM(units=256, return_sequences=True))
+        self.lstm2 = LSTM(units=256, return_sequences=True)
         self.dense = Dense(units=input_dim, activation='softmax')
         self.dense_for_midi = Dense(units=output_dim, activation='tanh')
         self.dense_for_concat = Dense(units=int(output_dim / 2), activation='relu')
         self.attention = Attention()
-        self.bn = BatchNormalization(axis=1)  # normalize according to each pitch class (has 128) in the batch
+        self.bn1 = BatchNormalization(axis=1)  # normalize according to each pitch class (has 128) in the batch
+        self.bn2 = BatchNormalization(axis=1)
+        self.bn3 = BatchNormalization()
 
     def call(self, inputs: Dict, training: bool = None, mask: bool = None):
         # input is a dict: {"input_1": [batch_size, input_length],
@@ -197,11 +201,11 @@ class RNN(Model):
         x = self.embed1(song)  # [batch_size, timestamps, embed_size]
         mask = self.embed1.compute_mask(song)
 
-        piano_roll_mat = self.bn(inputs["input_2"], training=training)  # [batch_size, 128, max_duration_secs]
+        piano_roll_mat = self.bn1(inputs["input_2"], training=training)  # [batch_size, 128, max_duration_secs]
         # piano_roll_mat = inputs["input_2"]
         piano_roll_mat = tf.transpose(piano_roll_mat, perm=[0, 2, 1])  # [batch_size, max_duration_secs, 128]
         piano_roll_mat = self.dense_for_midi(piano_roll_mat)  # [batch_size, max_duration_secs, embed_size]
-
+        piano_roll_mat = self.bn2(piano_roll_mat, training=training)
         # For each time step t in the song:
         #       calculate the attention with respect to each second in the song
         #       i.e: [second_vector*w_t for second_vector in piano_roll] where w_t is the word on time t
@@ -214,15 +218,16 @@ class RNN(Model):
             x = tf.concat([x, context], axis=-1)  # [batch_size, timetsteps, 2*embed_size]
             # in order to reduce sparse dimensionality
             x = self.dense_for_concat(x)  # [batch_size, timetsteps, embed_size/2]
+            x = self.bn3(x)
 
         x = self.lstm1(x, mask=mask)  # [batch_size, timesteps, units]
-        # x = self.lstm2(x, mask=mask)  # [batch_size, timesteps, units]
+        x = self.lstm2(x, mask=mask)  # [batch_size, timesteps, units]
         x = self.dense(x)  # [batch_size, timesteps, vocabulary_size]
 
         return x
 
 
-def train(csv_path: Path, test_path: Path, batch_size: int = 32, epochs: int = 10):
+def train(csv_path: Path, test_path: Path, batch_size: int = 2, epochs: int = 20):
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     logs_dir = "logs/fit/" + time
     tensorboard_callback = TensorBoard(log_dir=logs_dir,
@@ -242,7 +247,7 @@ def train(csv_path: Path, test_path: Path, batch_size: int = 32, epochs: int = 1
     word2vec_model = recreate_w2v_model_with_pad_key(word2vec_model, output_dim)
     word_to_index = word2vec_model.key_to_index
 
-    #for debug only!
+    # for debug only!
     # ds = create_dataset(csv_path, word_to_index, output_dim, batch_size=2, expand_vocab=True)
     # _ = create_dataset(test_path, word_to_index, output_dim, batch_size=2, expand_vocab=True)
     ####
@@ -257,12 +262,13 @@ def train(csv_path: Path, test_path: Path, batch_size: int = 32, epochs: int = 1
     RNN_model = RNN(input_dim=vocab_size,
                     pretrained_weights=pretrained_weights,
                     output_dim=output_dim)
-    RNN_model.compile(optimizer='adam',
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.01)
+    RNN_model.compile(optimizer=optimizer,
                       loss="sparse_categorical_crossentropy",
                       metrics=["accuracy"])
 
     # TODO: Trial - Erase
-    RNN_model.run_eagerly = True
+    # RNN_model.run_eagerly = True
 
     # End trial
 
@@ -299,20 +305,23 @@ def generate_song(csv_path, test_csv_path, path_to_model):
     word2vec_model = recreate_w2v_model_with_pad_key(word2vec_model, output_dim)
     word_to_index = word2vec_model.key_to_index
     # should update the model vocab
-    ds = create_dataset(csv_path, word_to_index, output_dim, expand_vocab=True)
-    X_test = create_dataset(test_csv_path, word_to_index, output_dim, batch_size=16, expand_vocab=True)
-
+    print('Loading Datasets...')
+    ds = create_dataset(csv_path, word_to_index, output_dim, batch_size=1, expand_vocab=True)
+    X_test = create_dataset(test_csv_path, word_to_index, output_dim, batch_size=1, expand_vocab=True)
 
     pretrained_weights = word2vec_model.vectors
     vocab_size, embedding_size = pretrained_weights.shape
 
+    print('Preparing Model...')
     # model = tf.keras.models.load_model(path_to_model)
 
     model = RNN(input_dim=vocab_size,
                 pretrained_weights=pretrained_weights,
                 output_dim=output_dim)
 
-    model.compile(optimizer='adam',
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.01)
+
+    model.compile(optimizer=optimizer,
                   loss="sparse_categorical_crossentropy",
                   metrics=["accuracy"])
 
@@ -346,7 +355,7 @@ def generate_song(csv_path, test_csv_path, path_to_model):
     w1_index = word_to_index['home']
     w2_index = word_to_index['all']
     w3_index = word_to_index['price']
-
+    print("Generating...")
     for song_midi, y in X_test:
 
         full_song = song_midi["input_1"]  # [batch_size, input_length]
@@ -366,7 +375,7 @@ def generate_song(csv_path, test_csv_path, path_to_model):
                 print(f'({i}): {lyrics}')
                 gen_songs.append(lyrics)
 
-            print("=" * 80)
+        print("=" * 80)
 
     return gen_songs
 
@@ -377,7 +386,7 @@ test_path = Path('lyrics_test_set.csv')
 # train(train_path,  test_path)
 
 
-path_to_model = 'model_save/rnn_20210522-140629.hdf5'
+path_to_model = 'model_save/rnn_20210522-195823.hdf5'
 
 generate_song(train_path, test_path, path_to_model)
 
