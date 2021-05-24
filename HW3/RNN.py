@@ -121,14 +121,74 @@ def create_dataset(csv_file_path: Path, word_to_index: Dict[str, int], output_di
 
     ds = Dataset.from_generator(generator=generator,
                                 output_types=({"input_1": tf.int64, "input_2": tf.float32}, tf.int64))
+    ds = ds.shuffle(buffer_size=len(songs_lyrics))
 
     ds = ds.padded_batch(batch_size, padded_shapes=({"input_1": [None], "input_2": [128, None]}, [None]))
 
-    ds = ds.shuffle(buffer_size=600)
     # for x, y in ds.as_numpy_iterator():
     #     print(x, y)
 
     return ds
+
+
+def create_dataset2(csv_file_path: Path, word_to_index: Dict[str, int], output_dim: int, batch_size: int = 32,
+                    expand_vocab=True) \
+        -> Dataset:
+    """
+    Generate the model dataset
+    :param csv_file_path: A path to the csv file containing the artist name, song name and lyrics
+    :param word_to_index: The word2vec model word to index dictionary
+    :param output_dim: The embedding layer output dimension
+    :param batch_size: The batch size
+    :return: A TensorFlow Dataset object containing the examples and labels
+    """
+    df = pd.read_csv(csv_file_path, header=None)
+    artists_names, songs_names, songs_lyrics = df.iloc[:, 0], df.iloc[:, 1], df.iloc[:, 2]
+    midi_embeddings_list, good_indices = generate_midi_embeddings(list(artists_names), list(songs_names))
+    songs_lyrics = [songs_lyrics[i] for i in good_indices]
+    if expand_vocab:
+        add_words_from_songs(word_to_index, songs_lyrics, output_dim)
+
+    import statistics
+
+    generator = gen(word_to_index, songs_lyrics, midi_embeddings_list)
+
+    max_song_len = max([len(tf_text_to_tokens(song)) for song in songs_lyrics])
+
+    ds = Dataset.from_generator(generator=generator,
+                                output_types=({"input_1": tf.int64, "input_2": tf.float32}, tf.int64))
+    ds = ds.shuffle(buffer_size=max_song_len * len(songs_lyrics))
+
+    ds = ds.padded_batch(batch_size, padded_shapes=({"input_1": [None], "input_2": [128, None]}, [None]))
+
+    ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+    print(
+        f'Estimated number of examples: {statistics.mean([len(tf_text_to_tokens(song)) for song in songs_lyrics]) * len(songs_lyrics)}')
+
+    return ds
+
+
+def gen(word_to_index, songs_lyrics, midi_embeddings_list):
+    """ Tokenize the songs lyrics to examples and labels
+    :param word_to_index: The word2vec model word to index dictionary
+    :param songs_lyrics: All songs lyrics
+    :return: A list of examples and corresponding labels - each represented by a list of indices of words
+    """
+
+    def generator():
+        for k, song in enumerate(songs_lyrics):
+            words_tokenized = tf_text_to_tokens(song)
+            words = [word_to_index[w] for w in words_tokenized]
+            for i, j in zip(range(len(words) - 1), range(1, len(words))):
+                # example: we are going ->
+                # x1 = [we], y1 = [are]
+                # x2 = [we are], y2 = [going]
+                x = words[:i + 1]
+                y = [words[j]]
+                yield {"input_1": x, "input_2": midi_embeddings_list[k]}, y
+
+    return generator
 
 
 def generate_midi_embeddings(artists_names: List[str], songs_names: List[str]) -> Tuple[List[np.array], List[int]]:
@@ -181,15 +241,17 @@ class RNN(Model):
         self.embed1.build((None,))
         self.embed1.set_weights([pretrained_weights])
         self.embed1.trainable = False
-        self.lstm1 = LSTM(units=256, return_sequences=True)
-        self.lstm2 = LSTM(units=256, return_sequences=True)
+        self.lstm1 = LSTM(units=256)
+        # self.lstm2 = LSTM(units=256, return_sequences=True)
         self.dense = Dense(units=input_dim, activation='softmax')
-        self.dense_for_midi = Dense(units=output_dim, activation='tanh')
-        self.dense_for_concat = Dense(units=int(output_dim / 2), activation='relu')
+        self.dense_for_midi = Dense(units=output_dim, activation='relu')
+        self.dense_for_concat1 = Dense(units=int(output_dim), activation='relu')
+        self.dense_for_concat2 = Dense(units=int(output_dim / 2), activation='relu')
         self.attention = Attention()
-        self.bn1 = BatchNormalization(axis=1)  # normalize according to each pitch class (has 128) in the batch
+        # self.bn1 = BatchNormalization(axis=1)  # normalize according to each pitch class (has 128) in the batch
         self.bn2 = BatchNormalization()
         self.bn3 = BatchNormalization()
+        self.bn4 = BatchNormalization()
 
     def call(self, inputs: Dict, training: bool = None, mask: bool = None):
         # input is a dict: {"input_1": [batch_size, input_length],
@@ -201,7 +263,7 @@ class RNN(Model):
         x = self.embed1(song)  # [batch_size, timestamps, embed_size]
         mask = self.embed1.compute_mask(song)
 
-        piano_roll_mat = self.bn1(inputs["input_2"], training=training)  # [batch_size, 128, max_duration_secs]
+        piano_roll_mat = inputs["input_2"]  # [batch_size, 128, max_duration_secs]
         # piano_roll_mat = inputs["input_2"]
         piano_roll_mat = tf.transpose(piano_roll_mat, perm=[0, 2, 1])  # [batch_size, max_duration_secs, 128]
         piano_roll_mat = self.dense_for_midi(piano_roll_mat)  # [batch_size, max_duration_secs, embed_size]
@@ -217,17 +279,21 @@ class RNN(Model):
         else:
             x = tf.concat([x, context], axis=-1)  # [batch_size, timetsteps, 2*embed_size]
             # in order to reduce sparse dimensionality
-            x = self.dense_for_concat(x)  # [batch_size, timetsteps, embed_size/2]
-            x = self.bn3(x)
+            # x = self.dense_for_concat1(x)  # [batch_size, timetsteps, embed_size]
+            # x = self.bn3(x)
+            # x = self.dense_for_concat2(x)  # [batch_size, timetsteps, embed_size/2]
+            # x = self.bn4(x)
 
-        x = self.lstm1(x, mask=mask)  # [batch_size, timesteps, units]
-        x = self.lstm2(x, mask=mask)  # [batch_size, timesteps, units]
+        x = self.lstm1(x, mask=mask, training=training)  # [batch_size, timesteps, units]
+        # Changed to # [batch_size, units]
+        # x = self.lstm2(x, mask=mask, training=training)  # [batch_size, timesteps, units]
         x = self.dense(x)  # [batch_size, timesteps, vocabulary_size]
+        # Changed to # [batch_size, vocabulary_size]
 
         return x
 
 
-def train(csv_path: Path, test_path: Path, batch_size: int = 2, epochs: int = 22):
+def train(csv_path: Path, test_path: Path, batch_size: int = 512, epochs: int = 15):
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     logs_dir = "logs/fit/" + time
     tensorboard_callback = TensorBoard(log_dir=logs_dir,
@@ -253,18 +319,61 @@ def train(csv_path: Path, test_path: Path, batch_size: int = 2, epochs: int = 22
     ####
 
     # ds = create_dataset(csv_path, word_to_index, output_dim, batch_size)
-    ds = create_dataset(csv_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
-    _ = create_dataset(test_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
+    ds = create_dataset2(csv_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
+    _ = create_dataset2(test_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
 
     pretrained_weights = word2vec_model.vectors
     vocab_size, embedding_size = pretrained_weights.shape
 
     RNN_model = RNN(input_dim=vocab_size,
                     pretrained_weights=pretrained_weights,
-                    output_dim=output_dim)
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.01)
+                    output_dim=output_dim, )
+    initial_lr = 0.01
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_lr,
+        decay_steps=3000,
+        decay_rate=0.99,
+        staircase=True
+    )
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+
+    loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
+        reduction='none'
+    )
+
+    def custom_loss(y_true, y_pred):
+        mask = tf.math.logical_not(tf.math.equal(y_true, 0))
+        loss_ = loss_object(y_true, y_pred)
+        mask = tf.cast(mask, dtype=loss_.dtype)
+        loss_ *= mask
+        # dividing by the number of not masked data points
+        final = tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+        # final = tf.reduce_mean(loss_)
+        return final
+
+    # y_true = np.array([[2, 3, 0], [1, 2, 3]])  # (2,3)
+    #
+    # # y_pred = np.array([[  # (2, 3, 4)
+    # #     [0.1, 0.2, 0.4, 0.3],
+    # #     [0.1, 0.2, 0.3, 0.4],
+    # #     [0.7, 0.1, 0.1, 0.1]
+    # # ], [
+    # #     [0.1, 0.4, 0.2, 0.3],
+    # #     [0.1, 0.2, 0.4, 0.3],
+    # #     [0.1, 0.1, 0.1, 0.7]
+    # # ]])
+    #
+    y_true = np.array([[3], [2]])  # (2,1)
+
+    y_pred = np.array([  # (2, 4)
+        [0, 0, 0, 1.0],
+        [0, 0, 1.0, 0],
+    ])
+
+    # lx = custom_loss(y_true, y_pred)
+
     RNN_model.compile(optimizer=optimizer,
-                      loss="sparse_categorical_crossentropy",
+                      loss=tf.keras.losses.SparseCategoricalCrossentropy(),
                       metrics=["accuracy"])
 
     # TODO: Trial - Erase
@@ -383,10 +492,10 @@ def generate_song(csv_path, test_csv_path, path_to_model):
 train_csv_filename = 'lyrics_train_set.csv'
 train_path = Path(rf'{train_csv_filename}')
 test_path = Path('lyrics_test_set.csv')
-train(train_path,  test_path)
+train(train_path, test_path)
 
+path_to_model = 'model_save/rnn_20210523-215859.hdf5'
 
-path_to_model = 'model_save/rnn_20210522-195823.hdf5'
 
 # generate_song(train_path, test_path, path_to_model)
 
