@@ -241,10 +241,10 @@ class RNN(Model):
         self.embed1.build((None,))
         self.embed1.set_weights([pretrained_weights])
         self.embed1.trainable = False
-        self.lstm1 = LSTM(units=256)
+        self.lstm1 = LSTM(units=256, return_sequences=True)
         # self.lstm2 = LSTM(units=256, return_sequences=True)
         self.dense = Dense(units=input_dim, activation='softmax')
-        self.dense_for_midi = Dense(units=output_dim, activation='relu')
+        self.dense_for_midi = Dense(units=output_dim, activation='tanh')
         self.dense_for_concat1 = Dense(units=int(output_dim), activation='relu')
         self.dense_for_concat2 = Dense(units=int(output_dim / 2), activation='relu')
         self.attention = Attention()
@@ -293,49 +293,18 @@ class RNN(Model):
         return x
 
 
-def train(csv_path: Path, test_path: Path, batch_size: int = 512, epochs: int = 15):
-    time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    logs_dir = "logs/fit/" + time
-    tensorboard_callback = TensorBoard(log_dir=logs_dir,
-                                       histogram_freq=1)
-
-    save_dir = f"model_save/rnn_{time}.hdf5"
-    save_callback = ModelCheckpoint(filepath=save_dir,
-                                    monitor="loss",
-                                    verbose=1,
-                                    save_best_only=True,
-                                    mode="auto", period=1)
-
-    output_dim = int(word2vec_model_name.split('-')[-1])
-
-    global word2vec_model
-
-    word2vec_model = recreate_w2v_model_with_pad_key(word2vec_model, output_dim)
-    word_to_index = word2vec_model.key_to_index
-
-    # for debug only!
-    # ds = create_dataset(csv_path, word_to_index, output_dim, batch_size=2, expand_vocab=True)
-    # _ = create_dataset(test_path, word_to_index, output_dim, batch_size=2, expand_vocab=True)
-    ####
-
-    # ds = create_dataset(csv_path, word_to_index, output_dim, batch_size)
-    ds = create_dataset2(csv_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
-    _ = create_dataset2(test_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
-
-    pretrained_weights = word2vec_model.vectors
-    vocab_size, embedding_size = pretrained_weights.shape
-
+def generate_model(vocab_size, pretrained_weights, output_dim):
+    """
+    Return the model after compilation
+    :param vocab_size:
+    :param pretrained_weights:
+    :param output_dim:
+    :return:
+    """
     RNN_model = RNN(input_dim=vocab_size,
                     pretrained_weights=pretrained_weights,
-                    output_dim=output_dim, )
-    initial_lr = 0.01
-    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_lr,
-        decay_steps=3000,
-        decay_rate=0.99,
-        staircase=True
-    )
-    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+                    output_dim=output_dim,
+                    use_attention_addition=True)
 
     loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
         reduction='none'
@@ -363,18 +332,55 @@ def train(csv_path: Path, test_path: Path, batch_size: int = 512, epochs: int = 
     # #     [0.1, 0.1, 0.1, 0.7]
     # # ]])
     #
-    y_true = np.array([[3], [2]])  # (2,1)
-
-    y_pred = np.array([  # (2, 4)
-        [0, 0, 0, 1.0],
-        [0, 0, 1.0, 0],
-    ])
+    # y_true = np.array([[3], [2]])  # (2,1)
+    #
+    # y_pred = np.array([  # (2, 4)
+    #     [0, 0, 0, 1.0],
+    #     [0, 0, 1.0, 0],
+    # ])
 
     # lx = custom_loss(y_true, y_pred)
 
-    RNN_model.compile(optimizer=optimizer,
-                      loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+    RNN_model.compile(optimizer='adam',
+                      loss=custom_loss,
                       metrics=["accuracy"])
+
+    return RNN_model
+
+
+def train(csv_path: Path, test_path: Path, batch_size: int = 2, epochs: int = 15):
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    logs_dir = "logs/fit/" + time
+    tensorboard_callback = TensorBoard(log_dir=logs_dir,
+                                       histogram_freq=1)
+
+    save_dir = f"model_save/rnn_{time}.hdf5"
+    save_callback = ModelCheckpoint(filepath=save_dir,
+                                    monitor="loss",
+                                    verbose=1,
+                                    save_best_only=True,
+                                    mode="auto", period=1)
+
+    output_dim = int(word2vec_model_name.split('-')[-1])
+
+    global word2vec_model
+
+    word2vec_model = recreate_w2v_model_with_pad_key(word2vec_model, output_dim)
+    word_to_index = word2vec_model.key_to_index
+
+    # for debug only!
+    # ds = create_dataset(csv_path, word_to_index, output_dim, batch_size=2, expand_vocab=True)
+    # _ = create_dataset(test_path, word_to_index, output_dim, batch_size=2, expand_vocab=True)
+    ####
+
+    # ds = create_dataset(csv_path, word_to_index, output_dim, batch_size)
+    ds = create_dataset(csv_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
+    _ = create_dataset(test_path, word_to_index, output_dim, batch_size=batch_size, expand_vocab=True)
+
+    pretrained_weights = word2vec_model.vectors
+    vocab_size, embedding_size = pretrained_weights.shape
+
+    RNN_model = generate_model(vocab_size, pretrained_weights, output_dim)
 
     # TODO: Trial - Erase
     # RNN_model.run_eagerly = True
@@ -424,15 +430,7 @@ def generate_song(csv_path, test_csv_path, path_to_model):
     print('Preparing Model...')
     # model = tf.keras.models.load_model(path_to_model)
 
-    model = RNN(input_dim=vocab_size,
-                pretrained_weights=pretrained_weights,
-                output_dim=output_dim)
-
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.01)
-
-    model.compile(optimizer=optimizer,
-                  loss="sparse_categorical_crossentropy",
-                  metrics=["accuracy"])
+    model = generate_model(vocab_size, pretrained_weights, output_dim)
 
     x_build = None
     x_build_ds = ds.take(1)
@@ -454,10 +452,16 @@ def generate_song(csv_path, test_csv_path, path_to_model):
         gen_song = song
         for i in range(50):
             inputs = {"input_1": gen_song, "input_2": song_midi["input_2"]}
-            next_word = model.predict(inputs)  # [batch_size, i + 1, vocabulary_size]
-            next_word = tf.expand_dims(next_word[:, -1, :], axis=1)  # taking the last prediction
-            next_word = tf.math.argmax(next_word, axis=-1)  # [batch_size, 1]
-            gen_song = tf.concat([gen_song, next_word], axis=-1)
+            pred = model.predict(inputs)  # [batch_size, i + 1, vocabulary_size]
+            pred = tf.expand_dims(pred[:, -1, :], axis=1)  # taking the last prediction
+            values, indices = tf.nn.top_k(pred, k=10)
+            indices = tf.squeeze(indices).numpy()
+            chosen_i = tf.random.uniform(shape=[1], minval=0, maxval=10, dtype=tf.int32).numpy()[0]
+            index_of_word = indices[chosen_i]
+            index_of_word = tf.constant([[index_of_word]], dtype=tf.int64)
+            # next_word = tf.math.argmax(next_word, axis=-1)  # [batch_size, 1]
+            tf.concat([gen_song, ], axis=-1)
+            gen_song = tf.concat([gen_song, index_of_word], axis=-1)
 
         return gen_song
 
@@ -494,8 +498,7 @@ train_path = Path(rf'{train_csv_filename}')
 test_path = Path('lyrics_test_set.csv')
 train(train_path, test_path)
 
-path_to_model = 'model_save/rnn_20210523-215859.hdf5'
-
+path_to_model = 'model_save/rnn_20210522-195823.hdf5'
 
 # generate_song(train_path, test_path, path_to_model)
 
