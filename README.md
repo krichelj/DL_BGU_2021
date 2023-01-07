@@ -1,2 +1,2 @@
 # DL_HWs
-Submitted homeworks at Deep Learning course, Information Systems Engineering, BGU, Israel, 2021
+Homeworks in Deep Learning course, Computer Science M.Sc., Ben Gurion University, Israel, 2021
