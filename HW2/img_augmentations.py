@@ -23,20 +23,11 @@ def _translate(img):
     :param img: shape : (1, ?, ?, ?)
     :return:
     """
-    # tx = np.random.randint(low=-50, high=50)
-    # ty = np.random.randint(low=-50, high=50)
-    #
-    # new_img = tf.keras.preprocessing.image.apply_affine_transform(
-    #     x=img,
-    #     tx=tx,
-    #     ty=ty
-    # )
     l = tf.keras.layers.experimental.preprocessing.RandomTranslation(
         height_factor=(-0.2, 0.2),
         width_factor=(-0.3, 0.3)
     )
 
-    # return new_img
     return l(img)
 
 def _rotation(img):
@@ -104,26 +95,8 @@ def _apply_random_transformations(images: tf.Tensor, label):
 
     if rands[0, 0] > prob:
         img1 = _translate(img1)
-    # if rands[0, 1] > prob:
-    #     img1 = _rotation(img1)
-    # if rands[0, 2] > prob:
-    #     img1 = _scaling(img1)
-    # if rands[0, 3] > prob:
-    #     img1 = _shear(img1)
 
     if rands[1, 0] > prob:
         img2 = _translate(img2)
-    # if rands[1, 1] > prob:
-    #     img2 = _rotation(img2)
-    # if rands[1, 2] > prob:
-    #     img2 = _scaling(img2)
-    # if rands[1, 3] > prob:
-    #     img2 = _shear(img2)
-
-    # img1 = tf.convert_to_tensor(img1)
-    # img2 = tf.convert_to_tensor(img2)
-
-
-    # return tf.stack([img1, img2], axis=0), label
 
     return tf.concat([img1,img2], axis=0)

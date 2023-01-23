@@ -1,4 +1,3 @@
-# import tensorflow as tf
 import matplotlib.pyplot as plt
 import pandas as pd
 from time import time
@@ -18,7 +17,6 @@ def plot_hist(df):
     value_counts = df['Name'].value_counts()
 
     counts = {i: value for i, value in enumerate(value_counts)}
-    # names = {i: value for i, value in enumerate(counts1.index)}
 
     fig, ax = plt.subplots()
     ax.bar(*zip(*counts.items()))
@@ -32,15 +30,3 @@ def plot_hist(df):
 df1, df2 = parse('pairsDevTrain.txt')
 plot_hist(df1)
 plot_hist(df2)
-
-# TODO
-# Num of unique train and test classes
-# Num of examples per class
-# Num of matching and unmatched pairs
-# Distributions of frequencies of matchings per class - either per class of per label
-#
-# df = pd.DataFrame({
-#     'length': [1.5, 0.5, 1.2, 0.9, 3],
-#     'width': [0.7, 0.2, 0.15, 0.2, 1.1]
-#     }, index=['pig', 'rabbit', 'duck', 'chicken', 'horse'])
-# hist = df.hist(bins=3)
