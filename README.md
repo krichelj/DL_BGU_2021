@@ -7,7 +7,7 @@ Nitzan Cohen and Joshua Shay Kricheli
 
 [[report]](HW1/DL_HW_1_Report.pdf), [[code]](https://github.com/krichelj/DL_HWs/tree/master/HW1), [[data]](https://paperswithcode.com/dataset/mnist)
 
-### HW2 - Facial Recognition using Siamese-Networks-for-One-Shot-Learning
+### HW2 - Facial Recognition using Siamese Networks for One Shot Learning
 
 [[report]](HW2/DL_HW_2_Report.pdf), [[paper]](https://www.cs.cmu.edu/~rsalakhu/papers/oneshot1.pdf), [[code]](https://github.com/krichelj/DL_HWs/tree/master/HW2), [[data]](http://vis-www.cs.umass.edu/lfw/index.html)
 
