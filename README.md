@@ -1,6 +1,6 @@
-# DL_HWs
+# DL_BGU_2021
 
-[Repo](https://github.com/krichelj/DL_HWs) for homeworks in Deep Learning course, Computer Science M.Sc., Ben Gurion University, Israel, 2021\
+Deep Learning course, Computer Science M.Sc., Ben Gurion University of the Negev, Israel, 2021\
 Nitzan Cohen and Joshua Shay Kricheli
 
 ### HW1 - Building A Neural Network from Scratch
